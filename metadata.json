@@ -1,0 +1,6 @@
+{
+  "name": "Solar Installation Project Manager & Digital Twin Dashboard",
+  "description": "ระบบจัดการข้อมูลโครงการและสรุปรายงานโครงการติดตั้งระบบผลิตไฟฟ้าจากพลังงานแสงอาทิตย์ (Solar Rooftop, Floating Solar, Solar Farm) ในรูปแบบ One Page Digital Twin Dashboard พร้อมฟังก์ชันนำออก PDF/JSON และการคำนวณสถิติอัตโนมัติ",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

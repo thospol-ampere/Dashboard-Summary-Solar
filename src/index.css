@@ -1,0 +1,99 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Custom Scrollbars for slick look */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.05);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.4);
+}
+
+/* Map pulse effects */
+@keyframes map-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(34, 211, 238, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(34, 211, 238, 0);
+  }
+}
+
+.animate-pulse-cyan {
+  animation: map-pulse 2s infinite;
+}
+
+/* ----------------- NATIVE PDF & PRINTER OPTIMIZATIONS ----------------- */
+@media print {
+  /* Hide interactive browser elements completely */
+  .print\:hidden,
+  button,
+  header,
+  footer,
+  input[type="file"] {
+    display: none !important;
+  }
+
+  /* Force background colors to print exactly */
+  html, body {
+    background-color: #070e1b !important;
+    color: #f8fafc !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    font-family: "Inter", sans-serif;
+  }
+
+  /* Target exact landscape output on A4 */
+  @page {
+    size: A4 landscape;
+    margin: 0;
+  }
+
+  /* Adjust sizing to prevent page spilling */
+  body {
+    margin: 0;
+    padding: 0;
+    width: 297mm;
+    height: 210mm;
+    overflow: hidden;
+  }
+
+  /* Main container layout overrides */
+  .max-w-\[1360px\] {
+    max-width: 100% !important;
+    width: 100% !important;
+    padding: 10mm !important;
+    margin: 0 !important;
+    box-sizing: border-box;
+  }
+
+  /* Render glow filters in vector graphics */
+  svg {
+    filter: none !important; /* Some browsers crash on composite filters during print; simplify */
+  }
+
+  /* Adjust map container height for printed sheet constraints */
+  .relative.w-full.h-\[620px\] {
+    height: 480px !important;
+  }
+}
