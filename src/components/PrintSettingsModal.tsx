@@ -1,11 +1,141 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
+import { jsPDF } from 'jspdf';
+import html2canvas from 'html2canvas';
 import { 
   X, Printer, Layout, Sliders, Palette, FileText, Check, Sparkles, Monitor,
   Folder, FolderOpen, Save, ChevronRight, PlusCircle, AlertCircle, Search, FileDown,
-  ArrowLeft, HardDrive, Laptop, HelpCircle
+  ArrowLeft, HardDrive, Laptop, HelpCircle, Tablet
 } from 'lucide-react';
 import { ProjectData, PROVINCE_MAP } from '../types';
+
+// Helper functions to convert OKLCH color strings to standard RGB/RGBA strings
+// because html2canvas does not support modern CSS color functions like OKLCH.
+function parseAndConvertOklch(fullMatch: string, innerContent: string): string {
+  const parts = innerContent.trim().split(/[\s/]+/);
+  if (parts.length < 3) return fullMatch;
+
+  const lStr = parts[0];
+  const cStr = parts[1];
+  const hStr = parts[2];
+  const aStr = parts[3] || '1';
+
+  let L = 0;
+  if (lStr.endsWith('%')) {
+    L = parseFloat(lStr) / 100;
+  } else {
+    L = parseFloat(lStr);
+  }
+
+  let C = 0;
+  if (cStr.endsWith('%')) {
+    C = parseFloat(cStr) / 100;
+  } else {
+    C = parseFloat(cStr);
+  }
+
+  let H = 0;
+  if (hStr === 'none') {
+    H = 0;
+  } else if (hStr.endsWith('deg')) {
+    H = parseFloat(hStr);
+  } else if (hStr.endsWith('rad')) {
+    H = parseFloat(hStr) * (180 / Math.PI);
+  } else if (hStr.endsWith('turn')) {
+    H = parseFloat(hStr) * 360;
+  } else {
+    H = parseFloat(hStr);
+  }
+
+  let A = 1;
+  if (aStr.endsWith('%')) {
+    A = parseFloat(aStr) / 100;
+  } else {
+    A = parseFloat(aStr);
+  }
+
+  if (isNaN(L) || isNaN(C) || isNaN(H)) return fullMatch;
+
+  const hRad = H * (Math.PI / 180);
+  const oklab_a = C * Math.cos(hRad);
+  const oklab_b = C * Math.sin(hRad);
+
+  const l_ = L + 0.3963377774 * oklab_a + 0.2158037573 * oklab_b;
+  const m_ = L - 0.1055613458 * oklab_a - 0.0638541728 * oklab_b;
+  const s_ = L - 0.0894841775 * oklab_a - 1.2914855414 * oklab_b;
+
+  const l_3 = l_ * l_ * l_;
+  const m_3 = m_ * m_ * m_;
+  const s_3 = s_ * s_ * s_;
+
+  const rLinear = +4.0767416621 * l_3 - 3.3077115913 * m_3 + 0.2309699292 * s_3;
+  const gLinear = -1.2684380046 * l_3 + 2.6097574011 * m_3 - 0.3413193965 * s_3;
+  const bLinear = -0.0041960863 * l_3 - 0.7034186147 * m_3 + 1.7076219004 * s_3;
+
+  const toSRGB = (c: number) => {
+    if (c <= 0.0031308) {
+      return Math.max(0, Math.min(255, Math.round(12.92 * c * 255)));
+    } else {
+      return Math.max(0, Math.min(255, Math.round((1.055 * Math.pow(c, 1 / 2.4) - 0.055) * 255)));
+    }
+  };
+
+  const srgb_r = toSRGB(rLinear);
+  const srgb_g = toSRGB(gLinear);
+  const srgb_b = toSRGB(bLinear);
+
+  if (A >= 1) {
+    return `rgb(${srgb_r}, ${srgb_g}, ${srgb_b})`;
+  } else {
+    return `rgba(${srgb_r}, ${srgb_g}, ${srgb_b}, ${A})`;
+  }
+}
+
+function replaceOklchInString(str: string): string {
+  if (!str || typeof str !== 'string') return str;
+  return str.replace(/oklch\(([^)]+)\)/g, parseAndConvertOklch);
+}
+
+const convertOklchStylesRecursively = (origNode: HTMLElement, cloneNode: HTMLElement) => {
+  const computed = window.getComputedStyle(origNode);
+  const propertiesToConvert = [
+    'color',
+    'backgroundColor',
+    'borderColor',
+    'borderTopColor',
+    'borderRightColor',
+    'borderBottomColor',
+    'borderLeftColor',
+    'outlineColor',
+    'fill',
+    'stroke',
+    'backgroundImage',
+    'boxShadow',
+    'textShadow',
+    'borderImage',
+    'background',
+    'border'
+  ];
+
+  propertiesToConvert.forEach((prop) => {
+    try {
+      const val = computed[prop as any];
+      if (val && val.includes('oklch')) {
+        const newVal = replaceOklchInString(val);
+        cloneNode.style[prop as any] = newVal;
+      }
+    } catch (e) {
+      // ignore style reading errors
+    }
+  });
+
+  const origChildren = origNode.children;
+  const cloneChildren = cloneNode.children;
+  const len = Math.min(origChildren.length, cloneChildren.length);
+  for (let i = 0; i < len; i++) {
+    convertOklchStylesRecursively(origChildren[i] as HTMLElement, cloneChildren[i] as HTMLElement);
+  }
+};
 
 interface PrintSettingsModalProps {
   isOpen: boolean;
@@ -36,7 +166,6 @@ export const PrintSettingsModal: React.FC<PrintSettingsModalProps> = ({
   setColorMode,
   onConfirmPrint,
 }) => {
-  if (!isOpen) return null;
 
   // ----------------- PRINT CONFIRMATION STATE -----------------
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
@@ -53,7 +182,7 @@ export const PrintSettingsModal: React.FC<PrintSettingsModalProps> = ({
   }, [project.projectName]);
 
   const [pdfFileName, setPdfFileName] = useState(defaultFileName);
-  const [selectedDirectory, setSelectedDirectory] = useState('Desktop/MEA_Solar_Rooftop_Projects');
+  const [selectedDirectory, setSelectedDirectory] = useState('Downloads');
   const [selectedPrinter, setSelectedPrinter] = useState('HP LaserJet Pro MFP M227 (ห้องผู้บริหาร)');
   const [printCopies, setPrintCopies] = useState(1);
   const [isDirPickerOpen, setIsDirPickerOpen] = useState(false);
@@ -74,7 +203,8 @@ export const PrintSettingsModal: React.FC<PrintSettingsModalProps> = ({
       { name: 'Desktop', type: 'folder' },
       { name: 'Documents', type: 'folder' },
       { name: 'Downloads', type: 'folder' },
-      { name: 'MEA_Cloud_Drive', type: 'folder' }
+      { name: 'MEA_Cloud_Drive', type: 'folder' },
+      { name: 'Tablet', type: 'folder' }
     ],
     'Desktop': [
       { name: 'MEA_Solar_Rooftop_Projects', type: 'folder' },
@@ -114,7 +244,28 @@ export const PrintSettingsModal: React.FC<PrintSettingsModalProps> = ({
       { name: 'เอกสารเผยแพร่_ประชาสัมพันธ์', type: 'folder' }
     ],
     'MEA_Cloud_Drive/โครงการติดตั้ง_Solar_MEA': [],
-    'MEA_Cloud_Drive/เอกสารเผยแพร่_ประชาสัมพันธ์': []
+    'MEA_Cloud_Drive/เอกสารเผยแพร่_ประชาสัมพันธ์': [],
+    'Tablet': [
+      { name: 'MEA_Solar_Rooftop_Projects', type: 'folder' },
+      { name: 'รายงานสรุป_2569', type: 'folder' },
+      { name: 'เอกสารแนบ_สัญญา', type: 'folder' }
+    ],
+    'Tablet/MEA_Solar_Rooftop_Projects': [
+      { name: 'รายงานสรุป_2569', type: 'folder' },
+      { name: 'ข้อมูลการติดตั้ง_MEA', type: 'folder' },
+      { name: 'เอกสารแนบ_สัญญา', type: 'folder' },
+      { name: 'MEA_Solar_Rooftop_Dashboard.pdf', type: 'file' }
+    ],
+    'Tablet/MEA_Solar_Rooftop_Projects/รายงานสรุป_2569': [
+      { name: 'ไตรมาส_1', type: 'folder' },
+      { name: 'ไตรมาส_2', type: 'folder' }
+    ],
+    'Tablet/MEA_Solar_Rooftop_Projects/รายงานสรุป_2569/ไตรมาส_1': [],
+    'Tablet/MEA_Solar_Rooftop_Projects/รายงานสรุป_2569/ไตรมาส_2': [],
+    'Tablet/MEA_Solar_Rooftop_Projects/ข้อมูลการติดตั้ง_MEA': [],
+    'Tablet/MEA_Solar_Rooftop_Projects/เอกสารแนบ_สัญญา': [],
+    'Tablet/รายงานสรุป_2569': [],
+    'Tablet/เอกสารแนบ_สัญญา': []
   });
   
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -201,23 +352,123 @@ export const PrintSettingsModal: React.FC<PrintSettingsModalProps> = ({
     // 2. Set temporary banners / feedback
     setIsExportDialogOpen(false);
     
-    const operationMsg = exportType === 'pdf' 
-      ? `กำลังบันทึกไฟล์ "${cleanTitle}.pdf" ลงในโฟลเดอร์ "${selectedDirectory.replace(/\//g, ' > ')}"...`
-      : `กำลังส่งไฟล์รายงานไปยังเครื่องพิมพ์ "${selectedPrinter}" จำนวน ${printCopies} ชุด...`;
-      
-    setNotificationMsg(operationMsg);
-    setShowNotification(true);
+    if (exportType === 'pdf') {
+      // Direct PDF Generation using html2canvas & jsPDF for Tablet and PC support
+      setNotificationMsg(`กำลังวิเคราะห์ความคมชัดและจัดเตรียมไฟล์ "${cleanTitle}.pdf"...`);
+      setShowNotification(true);
 
-    // 3. Trigger actual print dialog
-    setTimeout(() => {
-      onConfirmPrint();
-      
-      // Restore original page title after print command has been processed
       setTimeout(() => {
-        document.title = originalTitle;
-        setShowNotification(false);
-      }, 3000);
-    }, 800);
+        const input = document.getElementById('dashboard-print-area');
+        if (!input) {
+          setNotificationMsg('เกิดข้อผิดพลาด: ไม่พบพื้นที่ที่ต้องการสร้าง PDF');
+          setTimeout(() => setShowNotification(false), 4000);
+          document.title = originalTitle;
+          return;
+        }
+
+        // Capture dashboard element with precise dimension simulation and ignore viewport scroll
+        html2canvas(input, {
+          scale: 1.5, // Best balance of high definition and device memory safety
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+          backgroundColor: colorMode === 'dark' ? '#070e1b' : colorMode === 'grayscale' ? '#ffffff' : '#f8fafc',
+          scrollX: 0,
+          scrollY: 0,
+          width: input.scrollWidth || input.offsetWidth || 1360,
+          height: input.scrollHeight || input.offsetHeight || 1000,
+          windowWidth: input.scrollWidth || input.offsetWidth || 1360,
+          windowHeight: input.scrollHeight || input.offsetHeight || 1000,
+          onclone: (clonedDoc) => {
+            try {
+              const cloneRoot = clonedDoc.getElementById('dashboard-print-area');
+              if (cloneRoot && input) {
+                convertOklchStylesRecursively(input, cloneRoot);
+              }
+            } catch (err) {
+              console.error('Styles conversion inside onclone failed:', err);
+            }
+          }
+        }).then((canvas) => {
+          try {
+            const imgData = canvas.toDataURL('image/jpeg', 0.95);
+            
+            // Set up PDF matching paper settings
+            const pdfOrientation = orientation === 'landscape' ? 'l' : 'p';
+            const pdf = new jsPDF({
+              orientation: pdfOrientation,
+              unit: 'mm',
+              format: paperSize.toLowerCase() as any,
+            });
+
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = pdf.internal.pageSize.getHeight();
+
+            // Set background color of PDF to match theme
+            const isDark = colorMode === 'dark';
+            const isGrayscale = colorMode === 'grayscale';
+            const bgColor = isDark ? '#070e1b' : isGrayscale ? '#ffffff' : '#f8fafc';
+
+            pdf.setFillColor(bgColor);
+            pdf.rect(0, 0, pdfWidth, pdfHeight, 'F');
+
+            // Fit the image exactly to the PDF page dimensions
+            pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+
+            // Save/Download the file with double fallback for iframe sandbox environments
+            try {
+              pdf.save(`${cleanTitle}.pdf`);
+            } catch (saveError) {
+              console.warn('Standard pdf.save failed, using dynamic blob download:', saveError);
+              const blob = pdf.output('blob');
+              const blobUrl = URL.createObjectURL(blob);
+              const link = document.createElement('a');
+              link.href = blobUrl;
+              link.download = `${cleanTitle}.pdf`;
+              link.style.display = 'none';
+              document.body.appendChild(link);
+              link.click();
+              setTimeout(() => {
+                document.body.removeChild(link);
+                URL.revokeObjectURL(blobUrl);
+              }, 200);
+            }
+
+            setNotificationMsg(`บันทึกไฟล์ "${cleanTitle}.pdf" ลงในโฟลเดอร์ดาวน์โหลดเสร็จสิ้น!`);
+            setTimeout(() => {
+              setShowNotification(false);
+              document.title = originalTitle;
+            }, 3500);
+          } catch (error) {
+            console.error('PDF Generation Error:', error);
+            setNotificationMsg(`เกิดข้อผิดพลาดในการสร้างไฟล์ PDF: ${(error as Error).message}`);
+            setTimeout(() => setShowNotification(false), 5000);
+            document.title = originalTitle;
+          }
+        }).catch((err) => {
+          console.error('html2canvas Error:', err);
+          setNotificationMsg(`เกิดข้อผิดพลาดในระบบจำลองหน้าจอ: ${(err as Error).message}`);
+          setTimeout(() => setShowNotification(false), 5000);
+          document.title = originalTitle;
+        });
+      }, 300);
+
+    } else {
+      // Printer export using standard window.print() via prop
+      const operationMsg = `กำลังส่งไฟล์รายงานไปยังเครื่องพิมพ์ "${selectedPrinter}" จำนวน ${printCopies} ชุด...`;
+      setNotificationMsg(operationMsg);
+      setShowNotification(true);
+
+      setTimeout(() => {
+        onConfirmPrint();
+        
+        // Restore original page title after print command has been processed
+        setTimeout(() => {
+          document.title = originalTitle;
+          setShowNotification(false);
+        }, 3000);
+      }, 800);
+    }
   };
 
 
@@ -296,6 +547,8 @@ export const PrintSettingsModal: React.FC<PrintSettingsModalProps> = ({
     donutInstalled: isDark ? '#0ea5e9' : isGrayscale ? '#475569' : '#0284c7',
     donutInProgress: isDark ? '#f59e0b' : isGrayscale ? '#94a3b8' : '#ea580c',
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm transition-opacity duration-300">
@@ -767,7 +1020,6 @@ export const PrintSettingsModal: React.FC<PrintSettingsModalProps> = ({
                   <button
                     onClick={() => {
                       setExportType('pdf');
-                      setIsDirPickerOpen(true);
                     }}
                     className={`p-4 rounded-xl border text-left transition-all duration-200 flex items-start space-x-3.5 ${
                       exportType === 'pdf'
@@ -778,7 +1030,7 @@ export const PrintSettingsModal: React.FC<PrintSettingsModalProps> = ({
                     <FileDown className={`w-5 h-5 flex-shrink-0 mt-0.5 ${exportType === 'pdf' ? 'text-cyan-400' : 'text-slate-500'}`} />
                     <div>
                       <span className="text-xs font-bold block">บันทึกเป็นไฟล์ PDF (.pdf)</span>
-                      <span className="text-[9.5px] mt-1 block font-medium leading-relaxed opacity-80">บันทึกลงเครื่องคอมพิวเตอร์ สามารถเลือกโฟลเดอร์และตั้งชื่อไฟล์ได้</span>
+                      <span className="text-[9.5px] mt-1 block font-medium leading-relaxed opacity-80">บันทึกลงเครื่องคอมพิวเตอร์ หรือ แท็บเล็ตเครื่องนี้ โดยจะจัดเก็บลงในโฟลเดอร์ดาวน์โหลด (Downloads) โดยตรง</span>
                     </div>
                   </button>
 
@@ -847,22 +1099,16 @@ export const PrintSettingsModal: React.FC<PrintSettingsModalProps> = ({
 
                   {/* 2. Simulated Folder Selector */}
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">เลือกโฟลเดอร์ปลายทาง</label>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">ตำแหน่งจัดเก็บไฟล์</label>
                     <div className="flex items-center space-x-2">
-                      <div className="flex-1 flex items-center space-x-2 px-3 py-2.5 rounded-xl border border-slate-800 bg-slate-900/60 select-none overflow-hidden text-ellipsis">
-                        <Folder className="w-4 h-4 text-amber-500 flex-shrink-0" />
-                        <span className="text-xs text-slate-300 font-mono truncate">
-                          {selectedDirectory.replace(/\//g, ' > ')}
+                      <div className="flex-1 flex items-center space-x-2 px-3 py-2.5 rounded-xl border border-slate-800 bg-slate-950/40 select-none overflow-hidden text-ellipsis">
+                        <FileDown className="w-4 h-4 text-cyan-400 flex-shrink-0" />
+                        <span className="text-xs text-slate-300 font-medium">
+                          โฟลเดอร์ <strong className="text-cyan-400">Downloads (ดาวน์โหลด)</strong> ของอุปกรณ์นี้
                         </span>
                       </div>
-                      <button
-                        onClick={() => setIsDirPickerOpen(true)}
-                        className="px-3.5 py-2.5 bg-cyan-950 hover:bg-cyan-900 border border-cyan-800/50 hover:border-cyan-700 text-cyan-400 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition"
-                      >
-                        <FolderOpen className="w-3.5 h-3.5" />
-                        <span>เลือกโฟลเดอร์...</span>
-                      </button>
                     </div>
+                    <p className="text-[9.5px] text-slate-500 leading-relaxed">ระบบจะทำการจัดเก็บลงในโฟลเดอร์ Download ของคุณทันทีเมื่อการส่งออก PDF สำเร็จเสร็จสิ้น</p>
                   </div>
                 </div>
               ) : (
@@ -952,7 +1198,7 @@ export const PrintSettingsModal: React.FC<PrintSettingsModalProps> = ({
       {/* =========================================================================
           POPUP 2: SIMULATED FILE SYSTEM / DIRECTORY PICKER
           ========================================================================= */}
-      {isDirPickerOpen && (
+      {false && isDirPickerOpen && (
         <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md transition-all duration-300">
           <div className="w-full max-w-3xl h-[80vh] min-h-[480px] bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
             
@@ -1036,7 +1282,8 @@ export const PrintSettingsModal: React.FC<PrintSettingsModalProps> = ({
                   { id: 'Desktop', label: 'Desktop (เดสก์ท็อป)', path: 'Desktop' },
                   { id: 'Documents', label: 'Documents (เอกสาร)', path: 'Documents' },
                   { id: 'Downloads', label: 'Downloads (ดาวน์โหลด)', path: 'Downloads' },
-                  { id: 'MEA_Cloud', label: 'MEA Cloud Drive', path: 'MEA_Cloud_Drive' }
+                  { id: 'MEA_Cloud', label: 'MEA Cloud Drive', path: 'MEA_Cloud_Drive' },
+                  { id: 'Tablet', label: 'Tablet (แท็บเล็ตเครื่องนี้)', path: 'Tablet' }
                 ].map(item => (
                   <button
                     key={item.id}
@@ -1052,7 +1299,8 @@ export const PrintSettingsModal: React.FC<PrintSettingsModalProps> = ({
                   >
                     {item.id === 'Desktop' ? <Laptop className="w-3.5 h-3.5" /> : 
                      item.id === 'Documents' ? <FileText className="w-3.5 h-3.5" /> :
-                     item.id === 'Downloads' ? <FileDown className="w-3.5 h-3.5" /> : <HardDrive className="w-3.5 h-3.5" />}
+                     item.id === 'Downloads' ? <FileDown className="w-3.5 h-3.5" /> : 
+                     item.id === 'Tablet' ? <Tablet className="w-3.5 h-3.5" /> : <HardDrive className="w-3.5 h-3.5" />}
                     <span className="truncate">{item.label}</span>
                   </button>
                 ))}

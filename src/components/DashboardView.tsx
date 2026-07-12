@@ -2,10 +2,11 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { ProjectData } from '../types';
 import { ThailandMap } from './ThailandMap';
 import { PrintSettingsModal } from './PrintSettingsModal';
+import { ScreenCropper } from './ScreenCropper';
 import { 
   ArrowLeft, FileText, Printer, Building, ShieldCheck, Clock, Landmark, Percent, MapPin, 
   Settings, Zap, CheckCircle2, Hourglass, BarChart3, Leaf, Phone, Mail, Globe, Sparkles,
-  X, Sliders, Palette, Eye, Layout, Check
+  X, Sliders, Palette, Eye, Layout, Check, Crop, AlertCircle, Info
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -24,6 +25,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onClearAutoOpenPrint,
 }) => {
   const [hoveredLocationId, setHoveredLocationId] = useState<string | null>(null);
+
+  // ----------------- CROP / SCREENSHOT STATE -----------------
+  const [isCropModalOpen, setIsCropModalOpen] = useState(false);
+  const [localToast, setLocalToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const showLocalToast = (message: string, type: 'success' | 'error' | 'info') => {
+    setLocalToast({ message, type });
+  };
+
+  useEffect(() => {
+    if (localToast) {
+      const timer = setTimeout(() => {
+        setLocalToast(null);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [localToast]);
 
   // ----------------- PRINT SETTINGS STATE -----------------
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
@@ -267,6 +285,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         <div className="flex items-center space-x-2">
           <button
+            onClick={() => setIsCropModalOpen(true)}
+            className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-semibold transition shadow-md shadow-amber-950/40 cursor-pointer"
+          >
+            <Crop className="w-4 h-4" />
+            <span>ครอบตัดรูปภาพ</span>
+          </button>
+
+          <button
             onClick={() => setIsPrintModalOpen(true)}
             className="flex items-center space-x-1.5 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition shadow-md shadow-emerald-950/40 animate-pulse"
           >
@@ -277,7 +303,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* ----------------- DASHBOARD CONTAINER (A4 LANDSCAPE SCALE FRIENDLY) ----------------- */}
-      <div className="w-full max-w-[1360px] mx-auto p-4 md:p-6 flex flex-col flex-1 space-y-4 print:p-0 print:max-w-none print:w-full print-page-wrapper">
+      <div id="dashboard-print-area" className="w-full max-w-[1360px] mx-auto p-4 md:p-6 flex flex-col flex-1 space-y-4 print:p-0 print:max-w-none print:w-full print-page-wrapper">
         
         {/* ================= HEADER SECTION ================= */}
         <div className={`w-full rounded-xl border p-4.5 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm transition-all duration-300 ${theme.headerCard}`}>
@@ -432,27 +458,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {/* ----- COLUMN 2: INTERACTIVE MAP (MIDDLE, SPAN 6) ----- */}
           <div className="lg:col-span-6 flex flex-col justify-between map-container-print">
-            <div className={`rounded-xl p-3 flex-1 flex flex-col justify-between space-y-2 shadow-sm relative transition-all duration-300 ${theme.card}`}>
-              <div className={`border-b pb-1.5 flex items-center justify-between ${theme.accentBorder}`}>
-                <div className="flex items-center space-x-2">
-                  <MapPin className="w-4 h-4 text-cyan-500" />
-                  <h2 className="text-xs font-bold text-cyan-500 uppercase tracking-wider">แผนที่แสดงตำแหน่งสถานที่ติดตั้ง (Locations)</h2>
-                </div>
-                <span className={`text-[9px] font-bold px-2 py-0.5 rounded border transition-colors duration-300 ${theme.cyanBg} ${theme.accentBorderStrong}`}>
-                  DIGITAL CONSTANT PLOTTER
-                </span>
-              </div>
-
-              {/* Map Canvas */}
-              <div className="flex-1 w-full relative">
-                <ThailandMap
-                  locations={project.locations}
-                  hoveredLocationId={hoveredLocationId}
-                  setHoveredLocationId={setHoveredLocationId}
-                  colorMode={colorMode}
-                />
-              </div>
-            </div>
+            <ThailandMap
+              locations={project.locations}
+              hoveredLocationId={hoveredLocationId}
+              setHoveredLocationId={setHoveredLocationId}
+              colorMode={colorMode}
+              projectName={project.projectName}
+              customerName={project.customerName}
+            />
           </div>
 
           {/* ----- COLUMN 3: CHARTS & METRICS PANEL (RIGHT, SPAN 3) ----- */}
@@ -747,6 +760,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             window.print();
           }, 150);
         }}
+      />
+
+      {/* ----------------- LOCAL TOAST NOTIFICATIONS ----------------- */}
+      {localToast && (
+        <div className="fixed bottom-5 right-5 z-[110] bg-slate-900 border border-slate-800 text-slate-100 px-4 py-3 rounded-xl shadow-2xl flex items-center space-x-3 max-w-sm animate-in slide-in-from-bottom duration-300">
+          <div className="flex-shrink-0">
+            {localToast.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-400" />}
+            {localToast.type === 'error' && <AlertCircle className="w-5 h-5 text-rose-500" />}
+            {localToast.type === 'info' && <Info className="w-5 h-5 text-indigo-400" />}
+          </div>
+          <p className="text-xs font-semibold leading-snug">{localToast.message}</p>
+        </div>
+      )}
+
+      {/* ----------------- SCREEN CROPPER OVERLAY ----------------- */}
+      <ScreenCropper
+        targetElementId="dashboard-print-area"
+        isOpen={isCropModalOpen}
+        onClose={() => setIsCropModalOpen(false)}
+        showToast={showLocalToast}
       />
 
     </div>

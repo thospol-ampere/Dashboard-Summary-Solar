@@ -4,14 +4,55 @@ import { initialProject } from './mockData';
 import { ProjectForm } from './components/ProjectForm';
 import { DashboardView } from './components/DashboardView';
 import { 
-  Sparkles, Sun, FileCode, CheckCircle2, AlertCircle, Trash2, FolderSync, Info, Cpu, Github, Save, Download, X 
+  Sparkles, Sun, FileCode, CheckCircle2, AlertCircle, Trash2, FolderSync, Info, Cpu, Github, Save, Download, X, Plus
 } from 'lucide-react';
 
 export default function App() {
   const [view, setView] = useState<'form' | 'dashboard'>('form');
-  const [project, setProject] = useState<ProjectData>(initialProject);
+  const [project, setProject] = useState<ProjectData>(() => {
+    const savedActive = localStorage.getItem('solar_active_project');
+    if (savedActive) {
+      try {
+        return JSON.parse(savedActive);
+      } catch (e) {
+        return initialProject;
+      }
+    }
+    return initialProject;
+  });
   const [savedProjectsList, setSavedProjectsList] = useState<{ id: string; name: string }[]>([]);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [autoOpenPrint, setAutoOpenPrint] = useState(false);
+  const [openProjectIds, setOpenProjectIds] = useState<string[]>(() => {
+    const openIds: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('solar_proj_')) {
+        openIds.push(key.substring(11));
+      }
+    }
+    
+    let activeId = initialProject.id;
+    const savedActive = localStorage.getItem('solar_active_project');
+    if (savedActive) {
+      try {
+        const parsed = JSON.parse(savedActive);
+        if (parsed && parsed.id) {
+          activeId = parsed.id;
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+    
+    if (openIds.length === 0) {
+      openIds.push(activeId);
+    }
+    if (!openIds.includes(activeId)) {
+      openIds.push(activeId);
+    }
+    return openIds;
+  });
 
   // Save Modal States
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
@@ -32,13 +73,7 @@ export default function App() {
     
     // Check if there is an active project being edited, or seed the default
     const savedActive = localStorage.getItem('solar_active_project');
-    if (savedActive) {
-      try {
-        setProject(JSON.parse(savedActive));
-      } catch (e) {
-        setProject(initialProject);
-      }
-    } else {
+    if (!savedActive) {
       // Seed initial project into local storage as well for the first-time catalog
       const defaultId = initialProject.id;
       localStorage.setItem(`solar_proj_${defaultId}`, JSON.stringify(initialProject));
@@ -47,31 +82,65 @@ export default function App() {
     }
   }, []);
 
-  // Update active backup in local storage on every project state change
+  // Update active backup and correspond project state inside local storage on every project state change
   useEffect(() => {
     if (project && project.id) {
       localStorage.setItem('solar_active_project', JSON.stringify(project));
+      localStorage.setItem(`solar_proj_${project.id}`, JSON.stringify(project));
+      refreshSavedProjectsList();
     }
   }, [project]);
 
   const refreshSavedProjectsList = () => {
     const list: { id: string; name: string }[] = [];
+    const keysToDelete: string[] = [];
+
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key && key.startsWith('solar_proj_')) {
         const id = key.substring(11);
         try {
-          const data = JSON.parse(localStorage.getItem(key) || '{}');
+          const itemStr = localStorage.getItem(key);
+          if (!itemStr) continue;
+          const data = JSON.parse(itemStr);
+          
+          // Identify if it's an untouched "ลูกค้าใหม่" project
+          const isUntouchedNewClient = (
+            data.customerName === 'ลูกค้าใหม่' &&
+            (!data.locations || data.locations.length === 0)
+          );
+
+          // We delete empty new clients if they are NOT the currently active project
+          if (isUntouchedNewClient && project && id !== project.id) {
+            keysToDelete.push(key);
+            continue;
+          }
+
           list.push({
             id,
-            name: data.projectName || data.customerName || `โครงการ #${id}`,
+            name: data.customerName || data.projectName || `โครงการ #${id}`,
           });
         } catch (e) {
           // ignore corrupted data
         }
       }
     }
+
+    // Perform deletions and clean up tab IDs
+    if (keysToDelete.length > 0) {
+      keysToDelete.forEach((key) => {
+        localStorage.removeItem(key);
+      });
+      const deletedIds = keysToDelete.map((key) => key.substring(11));
+      setOpenProjectIds((prev) => prev.filter((id) => !deletedIds.includes(id)));
+    }
+
     setSavedProjectsList(list);
+  };
+
+  const getProjectName = (id: string) => {
+    const found = savedProjectsList.find((p) => p.id === id);
+    return found ? found.name : 'โครงการใหม่';
   };
 
   // ----------------- CORE CONTROLLER FUNCTIONS -----------------
@@ -99,6 +168,8 @@ export default function App() {
           ...updatedProject,
           id: newId,
         };
+        // Add to open tabs
+        setOpenProjectIds([...openProjectIds, newId]);
       }
 
       // Save to local storage
@@ -139,18 +210,57 @@ export default function App() {
     }
   };
 
+  // Switch Tab Handler
+  const handleSwitchTab = (id: string) => {
+    const key = `solar_proj_${id}`;
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      try {
+        setProject(JSON.parse(saved));
+      } catch (e) {
+        showToast('ไม่สามารถโหลดข้อมูลของแท็บนี้ได้', 'error');
+      }
+    }
+  };
+
+  // Close Tab Handler
+  const handleCloseTab = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    if (openProjectIds.length <= 1) {
+      showToast('ไม่สามารถปิดแท็บทั้งหมดได้ อย่างน้อยต้องมีหนึ่งโครงการเปิดอยู่', 'info');
+      return;
+    }
+
+    const newOpenIds = openProjectIds.filter((tabId) => tabId !== id);
+    setOpenProjectIds(newOpenIds);
+
+    if (project.id === id) {
+      const nextActiveId = newOpenIds[0];
+      const key = `solar_proj_${nextActiveId}`;
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        try {
+          setProject(JSON.parse(saved));
+        } catch (err) {
+          // fallback
+        }
+      }
+    }
+  };
+
   // 2. Add New Project
   const handleNewProject = () => {
     const newId = `solar-proj-${Date.now()}`;
     const newTemplate: ProjectData = {
       id: newId,
-      projectName: 'โครงการติดตั้งระบบผลิตไฟฟ้าจากพลังงานแสงอาทิตย์ใหม่',
-      customerName: 'ชื่อลูกค้าใหม่',
+      projectName: `โครงการใหม่ #${openProjectIds.length + 1}`,
+      customerName: 'ลูกค้าใหม่',
       projectType: 'Solar Rooftop',
       locations: [],
       contractCapacityTotal: 0,
       actualCapacityTotal: 0,
-      contractNumber: 'เลขที่สัญญา...',
+      contractNumber: `CONT-${Math.floor(1000 + Math.random() * 9000)}`,
       serviceDiscountPercent: 0,
       servicePeriodYears: 20,
       contractValue: 0,
@@ -171,7 +281,10 @@ export default function App() {
       updatedDate: new Date().toISOString().split('T')[0],
     };
 
+    localStorage.setItem(`solar_proj_${newId}`, JSON.stringify(newTemplate));
+
     setProject(newTemplate);
+    setOpenProjectIds([...openProjectIds, newId]);
     setView('form');
     showToast('สร้างแบบฟอร์มโครงการใหม่เรียบร้อยแล้ว', 'info');
   };
@@ -185,7 +298,13 @@ export default function App() {
         const parsed = JSON.parse(saved);
         setProject(parsed);
         setView('form');
-        showToast(`โหลดโครงการ "${parsed.customerName || 'ที่บันทึก'}" เรียบร้อยแล้ว`, 'success');
+        
+        // Open the tab if it wasn't already open
+        if (!openProjectIds.includes(id)) {
+          setOpenProjectIds([...openProjectIds, id]);
+        }
+        
+        showToast(`โหลดโครงการ "${parsed.customerName || parsed.projectName || 'ที่บันทึก'}" เรียบร้อยแล้ว`, 'success');
       } catch (e) {
         showToast('ไม่สามารถอ่านข้อมูลโครงการที่บันทึกได้', 'error');
       }
@@ -199,9 +318,31 @@ export default function App() {
     refreshSavedProjectsList();
     showToast('ลบโครงการออกจากคลังสำเร็จ', 'info');
 
-    // If deleted project is currently active, load default initial
-    if (project.id === id) {
-      setProject(initialProject);
+    const newOpenIds = openProjectIds.filter((tabId) => tabId !== id);
+    
+    if (newOpenIds.length === 0) {
+      const newId = `solar-proj-${Date.now()}`;
+      const newTemplate: ProjectData = {
+        ...initialProject,
+        id: newId,
+        projectName: 'โครงการติดตั้งระบบผลิตไฟฟ้าจากพลังงานแสงอาทิตย์ใหม่',
+      };
+      localStorage.setItem(`solar_proj_${newId}`, JSON.stringify(newTemplate));
+      setProject(newTemplate);
+      setOpenProjectIds([newId]);
+    } else {
+      setOpenProjectIds(newOpenIds);
+      if (project.id === id) {
+        const nextActiveId = newOpenIds[0];
+        const nextSaved = localStorage.getItem(`solar_proj_${nextActiveId}`);
+        if (nextSaved) {
+          try {
+            setProject(JSON.parse(nextSaved));
+          } catch (e) {
+            setProject(initialProject);
+          }
+        }
+      }
     }
   };
 
@@ -276,13 +417,9 @@ export default function App() {
   };
 
   const handleExportPDF = () => {
+    setAutoOpenPrint(true);
     setView('dashboard');
-    showToast('ระบบกำลังเปิดหน้าสั่งพิมพ์เพื่อส่งออก PDF...', 'success');
-    
-    // Allow React state transition to complete, then print
-    setTimeout(() => {
-      window.print();
-    }, 500);
+    showToast('กำลังแสดงหน้าตัวอย่างและเปิดหน้าต่างสั่งพิมพ์ / บันทึก PDF...', 'success');
   };
 
   return (
@@ -351,6 +488,69 @@ export default function App() {
 
       {/* ----------------- CORE VIEWS ----------------- */}
       <main className="flex-1 w-full print:p-0">
+        {/* ----------------- PROJECT TABS BAR (HIDDEN IN PRINT) ----------------- */}
+        <div className="bg-slate-900 text-slate-100 border-b border-slate-800 print:hidden shadow-inner select-none overflow-x-auto scrollbar-none">
+          <div className="max-w-7xl mx-auto px-4 md:px-6 py-2.5 flex items-center justify-between gap-4">
+            
+            {/* Left section: Tabs */}
+            <div className="flex items-center space-x-2 overflow-x-auto scrollbar-none py-1 flex-1">
+              <div className="flex items-center space-x-1.5 text-slate-400 text-xs font-semibold mr-3 flex-shrink-0">
+                <FolderSync className="w-4 h-4 text-indigo-400" />
+                <span>โครงการที่เปิดอยู่:</span>
+              </div>
+              
+              <div className="flex items-center space-x-2 overflow-x-auto scrollbar-none">
+                {openProjectIds.map((id) => {
+                  const isActive = project.id === id;
+                  const projName = getProjectName(id);
+                  
+                  return (
+                    <div
+                      key={id}
+                      onClick={() => handleSwitchTab(id)}
+                      className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl cursor-pointer transition text-xs font-semibold border ${
+                        isActive
+                          ? 'bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-950/40'
+                          : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:text-white'
+                      }`}
+                    >
+                      <span className="truncate max-w-[150px] sm:max-w-[220px]">
+                        {projName}
+                      </span>
+                      
+                      {/* Close Tab Button */}
+                      <button
+                        onClick={(e) => handleCloseTab(id, e)}
+                        className={`p-0.5 rounded-md hover:bg-slate-700 transition ${
+                          isActive ? 'text-indigo-200 hover:text-white' : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                        title="ปิดแท็บ"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Quick Add Tab Button */}
+              <button
+                onClick={handleNewProject}
+                className="flex items-center justify-center p-2 bg-slate-800 hover:bg-indigo-600 hover:text-white rounded-xl text-slate-300 transition ml-2 flex-shrink-0 border border-slate-700 hover:border-indigo-500"
+                title="เพิ่มโครงการใหม่ (เปิดแท็บใหม่)"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Right section: Quick stats */}
+            <div className="hidden md:flex items-center space-x-3 text-xs text-slate-400 bg-slate-800/40 px-3 py-1.5 rounded-xl border border-slate-700/30 font-medium">
+              <span>กำลังเปิดอยู่ {openProjectIds.length} โครงการ</span>
+            </div>
+
+          </div>
+        </div>
+
         {view === 'form' ? (
           <div className="py-6 px-4">
             <ProjectForm
@@ -372,6 +572,8 @@ export default function App() {
             project={project}
             onBackToEdit={() => setView('form')}
             onExportPDF={handleExportPDF}
+            autoOpenPrint={autoOpenPrint}
+            onClearAutoOpenPrint={() => setAutoOpenPrint(false)}
           />
         )}
       </main>
