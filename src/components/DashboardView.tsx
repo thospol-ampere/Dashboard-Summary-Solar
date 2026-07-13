@@ -3,6 +3,8 @@ import { ProjectData } from '../types';
 import { ThailandMap } from './ThailandMap';
 import { PrintSettingsModal } from './PrintSettingsModal';
 import { ScreenCropper } from './ScreenCropper';
+// @ts-ignore
+import solarHouseTwin from '../assets/images/solar_house_twin_1783944202937.jpg';
 import { 
   ArrowLeft, FileText, Printer, Building, ShieldCheck, Clock, Landmark, Percent, MapPin, 
   Settings, Zap, CheckCircle2, Hourglass, BarChart3, Leaf, Phone, Mail, Globe, Sparkles,
@@ -333,14 +335,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
 
-          {/* Logo Right */}
-          <div className="flex items-center space-x-3 md:text-right">
-            <div className="text-left md:text-right">
-              <span className="text-[9px] uppercase font-bold tracking-widest text-emerald-500 block">Clean Energy System</span>
-              <span className={`text-xs font-extrabold tracking-wider ${theme.title}`}>FOR A BETTER FUTURE</span>
-            </div>
-            <div className={`w-11 h-11 rounded-lg flex items-center justify-center border border-emerald-400/80 transition-all duration-300 ${theme.emeraldBg}`}>
-              <Zap className="w-6 h-6 text-emerald-400" />
+          {/* Logo Right - Futuristic Digital Twin House Badge */}
+          <div className="flex items-center space-x-3">
+            <div className={`relative w-20 h-20 md:w-24 md:h-24 rounded-xl overflow-hidden border transition-all duration-300 hover:scale-[1.03] hover:shadow-lg flex items-center justify-center ${
+              isDark 
+                ? 'border-cyan-500/30 bg-[#070e1b] shadow-[0_0_15px_rgba(6,182,212,0.15)]' 
+                : isGrayscale
+                  ? 'border-slate-300 bg-slate-50 filter grayscale'
+                  : 'border-slate-200 bg-slate-50 shadow-[0_2px_8px_rgba(15,23,42,0.04)]'
+            }`} title="Digital Twin Live Stream">
+              <img
+                src={solarHouseTwin}
+                alt="Solar Digital Twin"
+                referrerPolicy="no-referrer"
+                className={`w-full h-full object-cover transition-all duration-300 ${
+                  isDark ? 'opacity-90 mix-blend-lighten' : 'opacity-95'
+                }`}
+              />
+              {/* Pulsing Green status indicator */}
+              <div className="absolute top-1.5 right-1.5 flex items-center space-x-1 bg-black/40 backdrop-blur-sm px-1.5 py-0.5 rounded-full border border-emerald-500/30">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-[7px] text-emerald-400 font-extrabold font-mono tracking-widest uppercase font-sans">LIVE</span>
+              </div>
             </div>
           </div>
         </div>

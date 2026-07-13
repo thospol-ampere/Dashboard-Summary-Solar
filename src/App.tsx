@@ -60,6 +60,9 @@ export default function App() {
   const [saveActionType, setSaveActionType] = useState<'overwrite' | 'new'>('overwrite');
   const [downloadAsFile, setDownloadAsFile] = useState(false);
 
+  // Delete Modal States
+  const [projectToDelete, setProjectToDelete] = useState<{ id: string; name: string } | null>(null);
+
   // ----------------- TOAST ALERTS -----------------
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ message, type });
@@ -313,6 +316,12 @@ export default function App() {
 
   // 4. Delete Saved Project from Catalog
   const handleDeleteSavedProject = (id: string) => {
+    const projName = getProjectName(id);
+    setProjectToDelete({ id, name: projName });
+  };
+
+  // Perform the actual deletion after confirmation
+  const executeDeleteSavedProject = (id: string) => {
     const key = `solar_proj_${id}`;
     localStorage.removeItem(key);
     refreshSavedProjectsList();
@@ -520,11 +529,14 @@ export default function App() {
                       
                       {/* Close Tab Button */}
                       <button
-                        onClick={(e) => handleCloseTab(id, e)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteSavedProject(id);
+                        }}
                         className={`p-0.5 rounded-md hover:bg-slate-700 transition ${
                           isActive ? 'text-indigo-200 hover:text-white' : 'text-slate-400 hover:text-slate-200'
                         }`}
-                        title="ปิดแท็บ"
+                        title="ลบโครงการและปิดแท็บ"
                       >
                         <X className="w-3.5 h-3.5" />
                       </button>
@@ -699,6 +711,69 @@ export default function App() {
               >
                 <Save className="w-3.5 h-3.5" />
                 <span>ยืนยันการบันทึก</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ----------------- CONFIRM DELETE PROJECT MODAL ----------------- */}
+      {projectToDelete && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[110] p-4 animate-fade-in print:hidden">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden transform transition-all scale-100">
+            {/* Header */}
+            <div className="bg-rose-50 px-5 py-4 border-b border-rose-100 flex justify-between items-center">
+              <div className="flex items-center space-x-2 text-rose-700">
+                <div className="p-1.5 bg-rose-100 rounded-lg">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <span className="font-bold text-sm sm:text-base">ยืนยันการลบโครงการ</span>
+              </div>
+              <button
+                onClick={() => setProjectToDelete(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 hover:bg-rose-100/50 rounded-lg transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 space-y-4">
+              <div className="flex items-start space-x-3 bg-amber-50 border border-amber-200 p-3.5 rounded-xl text-amber-800">
+                <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-600" />
+                <div className="text-left text-xs sm:text-sm">
+                  <span className="font-bold block">คำเตือนระบบความปลอดภัย</span>
+                  <span className="block mt-0.5 text-amber-700 leading-relaxed">
+                    การลบโครงการนี้จะทำการลบข้อมูลออกจาก <b>"คลังโครงการที่บันทึกไว้"</b> ในระบบอย่างถาวร และปิดแท็บโครงการนี้ทันที
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1 text-left">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">โครงการที่จะลบ:</span>
+                <span className="text-sm font-extrabold text-slate-800 block bg-slate-50 px-3.5 py-3 rounded-xl border border-slate-200/60 truncate">
+                  {projectToDelete.name}
+                </span>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="bg-slate-50 px-5 py-3.5 border-t border-slate-100 flex justify-end items-center space-x-2">
+              <button
+                onClick={() => setProjectToDelete(null)}
+                className="px-4 py-2 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-100 transition"
+              >
+                ยกเลิก
+              </button>
+              <button
+                onClick={() => {
+                  executeDeleteSavedProject(projectToDelete.id);
+                  setProjectToDelete(null);
+                }}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-sm hover:shadow transition flex items-center space-x-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>ยืนยันการลบโครงการ</span>
               </button>
             </div>
           </div>

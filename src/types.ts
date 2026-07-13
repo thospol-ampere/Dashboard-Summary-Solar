@@ -118,4 +118,8 @@ export const PROVINCE_MAP: Record<string, { region: LocationItem['region']; x: n
   'ปัตตานี': { region: 'ภาคใต้', x: 46, y: 93 },
   'ยะลา': { region: 'ภาคใต้', x: 44, y: 95 },
   'นราธิวาส': { region: 'ภาคใต้', x: 49, y: 95 },
+  'นครนายก': { region: 'ภาคกลาง', x: 49, y: 51 },
+  'พิจิตร': { region: 'ภาคเหนือ', x: 41, y: 39 },
+  'กำแพงเพชร': { region: 'ภาคเหนือ', x: 34, y: 41 },
+  'เพชรบูรณ์': { region: 'ภาคเหนือ', x: 46, y: 39 },
 };

@@ -1,6 +1,96 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { ProjectData, LocationItem, PROVINCE_MAP } from '../types';
-import { Plus, Trash2, Save, Download, Upload, Eye, FileSpreadsheet, Sparkles, Building2, Phone, Mail, Award, CheckCircle2, ChevronRight, RefreshCw, Clock } from 'lucide-react';
+import { Plus, Trash2, Save, Download, Upload, Eye, FileSpreadsheet, Sparkles, Building2, Phone, Mail, Award, CheckCircle2, ChevronRight, RefreshCw, Clock, ChevronDown } from 'lucide-react';
+
+interface SearchableProvinceSelectProps {
+  value: string;
+  onChange: (value: string) => void;
+  provinceOptions: string[];
+}
+
+const SearchableProvinceSelect: React.FC<SearchableProvinceSelectProps> = ({
+  value,
+  onChange,
+  provinceOptions,
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState(value);
+
+  useEffect(() => {
+    setSearchTerm(value);
+  }, [value]);
+
+  const filteredOptions = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return provinceOptions;
+    return provinceOptions.filter((prov) =>
+      prov.toLowerCase().includes(term)
+    );
+  }, [searchTerm, provinceOptions]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setSearchTerm(val);
+    onChange(val);
+  };
+
+  const handleSelectOption = (prov: string) => {
+    setSearchTerm(prov);
+    onChange(prov);
+    setIsOpen(false);
+  };
+
+  return (
+    <div className="relative">
+      <div className="relative flex items-center">
+        <input
+          type="text"
+          value={searchTerm}
+          onFocus={() => setIsOpen(true)}
+          onBlur={() => {
+            // Delay slightly so that click events on option buttons can trigger before dropdown closes
+            setTimeout(() => {
+              setIsOpen(false);
+            }, 200);
+          }}
+          onChange={handleInputChange}
+          className="w-full px-3 py-1.5 border border-slate-300 rounded bg-white text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 pr-8"
+          placeholder="พิมพ์ค้นหา หรือกรอกชื่อจังหวัดใหม่..."
+        />
+        <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+          <ChevronDown className="w-4 h-4" />
+        </div>
+      </div>
+
+      {isOpen && (
+        <div className="absolute left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-1 text-xs text-left">
+          {filteredOptions.length > 0 ? (
+            filteredOptions.map((prov) => {
+              const reg = PROVINCE_MAP[prov]?.region || 'ภาคกลาง';
+              return (
+                <button
+                  key={prov}
+                  type="button"
+                  onMouseDown={() => handleSelectOption(prov)}
+                  className="w-full text-left px-3 py-2 hover:bg-slate-50 transition flex justify-between items-center text-slate-700"
+                >
+                  <span className="font-semibold">{prov}</span>
+                  <span className="text-[10px] text-slate-400 font-medium bg-slate-100 px-1.5 py-0.5 rounded">
+                    {reg}
+                  </span>
+                </button>
+              );
+            })
+          ) : (
+            <div className="px-3 py-2 text-slate-500 italic text-center">
+              ใช้จังหวัดตามพิมพ์: "{searchTerm}"
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
 interface ProjectFormProps {
   project: ProjectData;
@@ -250,9 +340,18 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
           
           // Auto update region based on province choice
           if (field === 'province') {
-            const mapped = PROVINCE_MAP[value];
+            const trimmed = (value || '').trim();
+            const mapped = PROVINCE_MAP[trimmed];
             if (mapped) {
               updatedLoc.region = mapped.region;
+            } else {
+              // Try finding regional match for custom province
+              const foundKey = Object.keys(PROVINCE_MAP).find(k => k.toLowerCase().includes(trimmed.toLowerCase()) || trimmed.toLowerCase().includes(k.toLowerCase()));
+              if (foundKey) {
+                updatedLoc.region = PROVINCE_MAP[foundKey].region;
+              } else {
+                updatedLoc.region = 'ภาคกลาง'; // Fallback
+              }
             }
           }
           
@@ -787,17 +886,11 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
                               {/* Province Selection */}
                               <div>
                                 <label className="block text-[10px] font-bold text-slate-600 mb-1">จังหวัดติดตั้ง (เพื่อกำหนดพิกัดแผนที่)</label>
-                                <select
+                                <SearchableProvinceSelect
                                   value={loc.province}
-                                  onChange={(e) => handleLocationChange(loc.id, 'province', e.target.value)}
-                                  className="w-full px-3 py-1.5 border border-slate-300 rounded bg-white text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                                >
-                                  {provinceOptions.map((prov) => (
-                                    <option key={prov} value={prov}>
-                                      {prov} ({PROVINCE_MAP[prov]?.region})
-                                    </option>
-                                  ))}
-                                </select>
+                                  onChange={(val) => handleLocationChange(loc.id, 'province', val)}
+                                  provinceOptions={provinceOptions}
+                                />
                               </div>
 
                               {/* Capacity kWp */}
