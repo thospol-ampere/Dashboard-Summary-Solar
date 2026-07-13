@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net - Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Core Reusable Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // 3. Validation Blueprints (Anti-Update-Gap)
+    function isValidProject(data) {
+      return data.id is string && data.id.size() <= 128
+        && data.projectName is string && data.projectName.size() > 0 && data.projectName.size() <= 256
+        && data.customerName is string && data.customerName.size() > 0 && data.customerName.size() <= 256
+        && data.ownerId is string && data.ownerId == request.auth.uid;
+    }
+
+    // 4. Secure Path rules for Projects
+    match /projects/{projectId} {
+      // Direct lookups
+      allow get: if isSignedIn() && existing().ownerId == request.auth.uid;
+      
+      // Secure list queries (Rule-Side Query Enforcer)
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      
+      // Creation gate
+      allow create: if isSignedIn() 
+        && isValidId(projectId)
+        && incoming().id == projectId
+        && isValidProject(incoming());
+        
+      // Update gate with immortal ownerId check
+      allow update: if isSignedIn()
+        && isValidId(projectId)
+        && isValidProject(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId;
+        
+      // Deletion gate
+      allow delete: if isSignedIn()
+        && isValidId(projectId)
+        && existing().ownerId == request.auth.uid;
+    }
+  }
+}

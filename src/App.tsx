@@ -4,8 +4,11 @@ import { initialProject } from './mockData';
 import { ProjectForm } from './components/ProjectForm';
 import { DashboardView } from './components/DashboardView';
 import { 
-  Sparkles, Sun, FileCode, CheckCircle2, AlertCircle, Trash2, FolderSync, Info, Cpu, Github, Save, Download, X, Plus
+  Sparkles, Sun, FileCode, CheckCircle2, AlertCircle, Trash2, FolderSync, Info, Cpu, Github, Save, Download, X, Plus, LogIn, LogOut, Cloud
 } from 'lucide-react';
+import { signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut, User } from 'firebase/auth';
+import { auth, db, handleFirestoreError, OperationType } from './firebase';
+import { collection, doc, setDoc, getDocs, deleteDoc, query, where, onSnapshot } from 'firebase/firestore';
 
 export default function App() {
   const [view, setView] = useState<'form' | 'dashboard'>('form');
@@ -63,6 +66,140 @@ export default function App() {
   // Delete Modal States
   const [projectToDelete, setProjectToDelete] = useState<{ id: string; name: string } | null>(null);
 
+  // ----------------- FIREBASE SYNC & AUTH STATES & EFFECTS -----------------
+  const [user, setUser] = useState<User | null>(null);
+  const [syncing, setSyncing] = useState<boolean>(false);
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
+
+  // Initialize Firebase Auth and sync
+  useEffect(() => {
+    let unsubscribeRealtime: (() => void) | undefined;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser);
+        setAuthLoading(false);
+        // Sync with Firestore
+        try {
+          const unsub = await syncWithFirestore(currentUser);
+          if (unsub) {
+            unsubscribeRealtime = unsub;
+          }
+        } catch (err) {
+          console.error("Error setting up sync:", err);
+        }
+      } else {
+        setUser(null);
+        // Try signing in anonymously for background sync if enabled
+        try {
+          await signInAnonymously(auth);
+        } catch (err) {
+          console.warn("Anonymous Auth is disabled or restricted in the Firebase console. Falling back to local mode:", err);
+          setAuthLoading(false);
+        }
+      }
+    });
+
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeRealtime) unsubscribeRealtime();
+    };
+  }, []);
+
+  const syncWithFirestore = async (currentUser: User) => {
+    setSyncing(true);
+    const userId = currentUser.uid;
+    const path = 'projects';
+
+    try {
+      // 1. Fetch current projects from Firestore
+      const q = query(collection(db, path), where('ownerId', '==', userId));
+      const querySnapshot = await getDocs(q);
+      const firestoreProjects: Record<string, ProjectData> = {};
+      querySnapshot.forEach((doc) => {
+        firestoreProjects[doc.id] = doc.data() as ProjectData;
+      });
+
+      // 2. Identify local projects
+      const localProjects: Record<string, ProjectData> = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('solar_proj_')) {
+          const id = key.substring(11);
+          try {
+            const item = localStorage.getItem(key);
+            if (item) {
+              localProjects[id] = JSON.parse(item);
+            }
+          } catch (e) {
+            // corrupt local json
+          }
+        }
+      }
+
+      // 3. Migrate any local-only projects to Firestore
+      for (const id in localProjects) {
+        if (!firestoreProjects[id]) {
+          const proj = localProjects[id];
+          const docRef = doc(db, 'projects', id);
+          await setDoc(docRef, {
+            ...proj,
+            ownerId: userId,
+          });
+          firestoreProjects[id] = proj;
+        }
+      }
+
+      // 4. Save any firestore projects to local storage if they are missing locally
+      for (const id in firestoreProjects) {
+        if (!localProjects[id]) {
+          localStorage.setItem(`solar_proj_${id}`, JSON.stringify(firestoreProjects[id]));
+        }
+      }
+
+      // 5. Setup realtime listener for any concurrent updates
+      const unsubscribeRealtime = onSnapshot(q, (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          const docData = change.doc.data() as ProjectData;
+          if (change.type === 'added' || change.type === 'modified') {
+            localStorage.setItem(`solar_proj_${change.doc.id}`, JSON.stringify(docData));
+          } else if (change.type === 'removed') {
+            localStorage.removeItem(`solar_proj_${change.doc.id}`);
+          }
+        });
+        refreshSavedProjectsList();
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'projects');
+      });
+
+      refreshSavedProjectsList();
+      setSyncing(false);
+      return unsubscribeRealtime;
+    } catch (error) {
+      console.error("Firestore sync error:", error);
+      setSyncing(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+      showToast('เข้าสู่ระบบและเชื่อมคลาวด์สำเร็จ', 'success');
+    } catch (error) {
+      showToast('เข้าสู่ระบบไม่สำเร็จ: ' + (error instanceof Error ? error.message : String(error)), 'error');
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      showToast('ออกจากระบบเรียบร้อยแล้ว', 'info');
+    } catch (error) {
+      showToast('ออกจากระบบไม่สำเร็จ', 'error');
+    }
+  };
+
   // ----------------- TOAST ALERTS -----------------
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ message, type });
@@ -91,6 +228,17 @@ export default function App() {
       localStorage.setItem('solar_active_project', JSON.stringify(project));
       localStorage.setItem(`solar_proj_${project.id}`, JSON.stringify(project));
       refreshSavedProjectsList();
+
+      // Sync active edits to Firestore
+      if (auth.currentUser) {
+        const docRef = doc(db, 'projects', project.id);
+        setDoc(docRef, {
+          ...project,
+          ownerId: auth.currentUser.uid,
+        }).catch((err) => {
+          console.warn("Real-time cloud save pending connection:", err);
+        });
+      }
     }
   }, [project]);
 
@@ -327,6 +475,13 @@ export default function App() {
     refreshSavedProjectsList();
     showToast('ลบโครงการออกจากคลังสำเร็จ', 'info');
 
+    // Delete from Firestore if signed in
+    if (auth.currentUser) {
+      deleteDoc(doc(db, 'projects', id)).catch((err) => {
+        console.warn("Could not sync deletion to cloud:", err);
+      });
+    }
+
     const newOpenIds = openProjectIds.filter((tabId) => tabId !== id);
     
     if (newOpenIds.length === 0) {
@@ -457,19 +612,73 @@ export default function App() {
               </div>
             </div>
 
-            {/* Quick stats on Header */}
-            <div className="flex items-center space-x-4 bg-indigo-950/40 px-4 py-2 rounded-xl border border-indigo-800/30 text-xs w-full sm:w-auto justify-between sm:justify-start">
-              <div className="text-left pr-4 border-r border-indigo-800/50">
-                <span className="text-slate-400 text-[10px] block">โครงการที่กรอกอยู่</span>
-                <span className="text-amber-400 font-bold font-mono block truncate max-w-[150px]">
-                  {project.customerName || 'ไม่มีชื่อลูกค้า'}
-                </span>
+            {/* Header Right Content Area (Stats & Cloud Sync) */}
+            <div className="flex flex-col md:flex-row items-center gap-3 w-full sm:w-auto">
+              {/* Quick stats on Header */}
+              <div className="flex items-center space-x-4 bg-indigo-950/40 px-4 py-2 rounded-xl border border-indigo-800/30 text-xs w-full justify-between sm:justify-start">
+                <div className="text-left pr-4 border-r border-indigo-800/50">
+                  <span className="text-slate-400 text-[10px] block">โครงการที่กรอกอยู่</span>
+                  <span className="text-amber-400 font-bold font-mono block truncate max-w-[150px]">
+                    {project.customerName || 'ไม่มีชื่อลูกค้า'}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="text-slate-400 text-[10px] block">กำลังติดตั้งรวม</span>
+                  <span className="text-white font-bold font-mono">
+                    {project.contractCapacityTotal.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kWp
+                  </span>
+                </div>
               </div>
-              <div className="text-right">
-                <span className="text-slate-400 text-[10px] block">กำลังติดตั้งรวม</span>
-                <span className="text-white font-bold font-mono">
-                  {project.contractCapacityTotal.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kWp
-                </span>
+
+              {/* Firebase Sync & Authentication Control */}
+              <div className="flex items-center space-x-3 bg-indigo-950/35 px-4 py-2 rounded-xl border border-indigo-800/25 text-xs w-full justify-between sm:justify-start">
+                <div className="flex items-center space-x-2 text-left">
+                  {syncing ? (
+                    <div className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                    </div>
+                  ) : (
+                    <span className={`h-2 w-2 rounded-full ${user && !user.isAnonymous ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
+                  )}
+                  <div>
+                    <span className="text-slate-400 text-[9px] block">สถานะจัดเก็บข้อมูล (Storage Status)</span>
+                    <span className="text-indigo-200 font-bold block">
+                      {syncing 
+                        ? '🔄 กำลังซิงก์คลาวด์...' 
+                        : user && !user.isAnonymous 
+                          ? '☁️ ซิงก์บนคลาวด์สำเร็จ' 
+                          : '💾 บันทึกในบราวเซอร์ (Local)'}
+                    </span>
+                  </div>
+                </div>
+                
+                <div className="pl-3 border-l border-indigo-800/50 flex items-center space-x-2">
+                  {user && !user.isAnonymous ? (
+                    <div className="flex items-center space-x-2">
+                      <div className="text-right">
+                        <span className="text-amber-400 text-[9px] font-bold block">ผู้ใช้งาน (Google)</span>
+                        <span className="text-white block font-medium truncate max-w-[100px]">{user.displayName || user.email}</span>
+                      </div>
+                      <button
+                        onClick={handleLogout}
+                        className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 rounded-lg border border-rose-500/20 transition-all cursor-pointer"
+                        title="ออกจากระบบ"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={handleGoogleLogin}
+                      className="flex items-center space-x-1.5 px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-lg shadow transition-all hover:scale-[1.02] cursor-pointer"
+                      title="สำรองข้อมูลบนบัญชี Google ของคุณ"
+                    >
+                      <LogIn className="w-3.5 h-3.5" />
+                      <span>ผูกบัญชี Google</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 

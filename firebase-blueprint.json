@@ -1,0 +1,31 @@
+{
+  "entities": {
+    "Project": {
+      "title": "Solar Installation Project",
+      "description": "Information about a solar installation project with its locations and contacts.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "projectName": { "type": "string", "maxLength": 256 },
+        "customerName": { "type": "string", "maxLength": 256 },
+        "projectType": { "type": "string", "enum": ["Solar Rooftop", "Floating Solar", "Solar Farm"] },
+        "contractCapacityTotal": { "type": "number" },
+        "actualCapacityTotal": { "type": "number" },
+        "contractNumber": { "type": "string", "maxLength": 256 },
+        "serviceDiscountPercent": { "type": "number" },
+        "servicePeriodYears": { "type": "number" },
+        "contractValue": { "type": "number" },
+        "updatedDate": { "type": "string", "maxLength": 128 },
+        "targetCO2ReductionFactor": { "type": "number" },
+        "ownerId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "projectName", "customerName", "ownerId"]
+    }
+  },
+  "firestore": {
+    "projects/{projectId}": {
+      "schema": "Project",
+      "description": "Collection of solar projects mapped by their IDs"
+    }
+  }
+}
